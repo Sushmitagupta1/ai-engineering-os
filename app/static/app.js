@@ -4,6 +4,7 @@ let project = null;
 let tree = [];
 let poll = null;
 let pendingCopy = null;
+let currentLang = "english";
 
 function toast(msg, isErr = false) {
   const t = $("#toast");
@@ -31,7 +32,7 @@ async function loadProjects() {
     const ul = $("#project-list");
     ul.innerHTML = "";
     if (!projects.length) {
-      ul.innerHTML = `<li class="muted">+ se project add karo</li>`;
+      ul.innerHTML = `<li class="muted">Add a project using +</li>`;
       return;
     }
     projects.forEach((p) => {
@@ -75,7 +76,7 @@ async function selectProject(path, name) {
 }
 
 function askPath() {
-  const p = prompt("Project folder ka full path paste karo:", "C:\\Users\\Aum\\Documents\\Default Project\\unit-converter");
+  const p = prompt("Paste the full project folder path:", "C:\\Users\\Aum\\Documents\\Default Project\\unit-converter");
   if (p) selectProject(p.trim(), null);
 }
 
@@ -169,7 +170,7 @@ async function showPrimer() {
       html += `<span class="k">Eval</span><div>${p.eval.total_runs || 0} runs · pass ${
         p.eval.pass_rate ?? "?"
       } · $${p.eval.total_cost_usd ?? "0.00"}</div>`;
-    $("#primer-body").innerHTML = html || `<div class="muted">memory khali hai</div>`;
+    $("#primer-body").innerHTML = html || `<div class="muted">memory is empty</div>`;
     $("#primer-panel").classList.remove("hidden");
   } catch (e) {
     toast(e.message, true);
@@ -188,7 +189,7 @@ function addMsg(cls, html) {
 
 async function runJob(instruction, apply, actLabel) {
   if (!project) {
-    toast("pehle project select karo (+)", true);
+    toast("Select a project first (+)", true);
     return;
   }
   const send = $("#chat-send");
@@ -196,13 +197,14 @@ async function runJob(instruction, apply, actLabel) {
   addMsg("me", escape(instruction));
   const busy = addMsg(
     "busy",
-    `🧠 ${escape(actLabel)} chal raha hai… (plan → worker → test → diff)`
+    `🧠 ${escape(actLabel)} in progress… (plan → worker → test → diff)`
   );
   try {
     const r = await api("/api/agent/run", {
       method: "POST",
       body: JSON.stringify({ project: project.path, instruction, apply }),
     });
+    currentLang = r.lang || "english";
     busy.remove();
     $("#job-panel").classList.remove("hidden");
     $("#job-title").textContent = `Agent — ${project.name}`;
@@ -256,7 +258,7 @@ function finishJob(st, instruction, apply, actLabel) {
   parts.push(`<b>${escape(actLabel)}</b> — ${r.green ? "✅ tests green" : "❌ tests red"}`);
   if (r.iterations) parts.push(`iterations: ${r.iterations}`);
   const files = r.patch?.changed_files || [];
-  parts.push(files.length ? `files: ${escape(files.join(", "))}` : "koi file nahi badli");
+  parts.push(files.length ? `files: ${escape(files.join(", "))}` : "no files changed");
   addMsg("ai", parts.join("<br>"));
 
   if (r.worker_reply) {
@@ -273,7 +275,7 @@ function finishJob(st, instruction, apply, actLabel) {
     </div>
     <div id="diff-box" class="diff hidden"></div>`;
   } else {
-    html = `<div class="muted">kuch bhi apply karne ko nahi hai</div>`;
+    html = `<div class="muted">nothing to apply</div>`;
   }
   res.innerHTML = html;
 
@@ -309,7 +311,7 @@ function finishJob(st, instruction, apply, actLabel) {
   if (bd)
     bd.onclick = () => {
       $("#job-panel").classList.add("hidden");
-      addMsg("sys", "dismissed (copy safe .os/sandbox mein hai)");
+      addMsg("sys", "dismissed (copy is safe in .os/sandbox)");
     };
 }
 

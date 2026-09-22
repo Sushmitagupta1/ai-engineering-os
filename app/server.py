@@ -38,6 +38,51 @@ HERE = Path(__file__).resolve().parent
 STATIC = HERE / "static"
 PROJECTS_FILE = ROOT / ".os" / "app" / "projects.json"
 
+def _detect_lang(text: str) -> str:
+    """Return 'hinglish' when the user clearly writes in Devanagari or heavy Hinglish,
+    else 'english'. Bengali/Gujarati/etc count as non-English too -> hinglish fallback."""
+    if any("\u0900" <= ch <= "\u097F" for ch in text):  # Devanagari
+        return "hinglish"
+    if any("\u0980" <= ch <= "\u09FF" for ch in text):  # Bengali
+        return "hinglish"
+    if any("\u0A00" <= ch <= "\u0A7F" for ch in text):  # Gurmukhi
+        return "hinglish"
+    if any("\u0A80" <= ch <= "\u0AFF" for ch in text):  # Gujarati
+        return "hinglish"
+    words = {w for w in text.lower().split() if len(w) > 1}
+    strong = {"karo", "karna", "hai", "hain", "raha", "rahi", "banao", "chahiye",
+              "nahi", "nhi", "sare", "saare", "batao", "dikhao", "kholo",
+              "samajh", "kro", "laga", "apna", "apne", "isko", "usko", "yahan",
+              "wahan", "naya", "nayi", "karey", "kre", "pure", "sahi",
+              "thik", "lo", "dalo", "likho", "kardo", "kara", "kiya", "mera",
+              "tumhara", "aapka", "karta", "karti", "chal", "chala", "jata",
+              "jati", "hume", "bilkul", "aur", "hoga", "hota", "karne",
+              "banane", "dikhta", "milta", "ho", "jaye", "jake", "khud",
+              "waali", "wali", "alag", "jaisa", "kaise", "kiske", "kisi"}
+    hits_strong = words & strong
+    if hits_strong:
+        return "hinglish"
+    hing = {"karo", "karna", "hai", "hain", "raha", "rahi", "bana", "banao",
+            "do", "de", "chahiye", "kaam", "kya", "ye", "wo", "wala",
+            "nahi", "batao", "dikho", "kholo", "samajh", "project", "kro",
+            "kar", "laga", "tha", "kuch", "apna", "apne", "isko", "usko",
+            "yahan", "wahan", "ek", "naya", "nayi", "jo", "karey", "kre",
+            "ko", "se", "par", "ke", "aur", "phir", "agar", "toh", "hota",
+            "hoga", "me", "jis", "unko", "inco", "mera", "tum", "aap",
+            "kiya", "karta", "karti", "chal", "chala", "jata", "jati",
+            "hume", "hum", "bilkul", "karne", "banane", "milta", "dikhta"}
+    hits = words & hing
+    return "hinglish" if len(hits) >= 3 else "english"
+
+
+def _dirive_lang(lang: str, reply: bool = True) -> str:
+    if lang == "hinglish":
+        return ("Reply in simple Hinglish (Hindi written in English letters). "
+                "Use English for technical/code terms." if reply else
+                "Please respond in simple Hinglish.")
+    return ("Reply in English." if reply else "Please respond in English.")
+
+
 FREE_MODEL = "opencode/big-pickle"
 
 # silence git CRLF chatter etc. via normal stderr capture
@@ -118,7 +163,7 @@ async def api_project_select(req: Request) -> dict:
     path = str(body.get("path", "")).strip().strip('"').strip("'")
     root = Path(path).resolve()
     if not root.exists() or not root.is_dir():
-        return JSONResponse({"error": f"folder nahi mila: {path}"}, status_code=400)
+        return JSONResponse({"error": f"folder not found: {path}"}, status_code=400)
     projs = _projects()
     projs = [p for p in projs if Path(p["path"]).resolve() != root]
     projs.insert(0, {"path": str(root), "name": root.name, "selected": time.time()})
@@ -130,7 +175,7 @@ async def api_project_select(req: Request) -> dict:
 def api_project_tree(path: str) -> dict:
     root = Path(path).resolve()
     if not root.is_dir():
-        return JSONResponse({"error": "folder nahi mila"}, status_code=400)
+        return JSONResponse({"error": "folder not found"}, status_code=400)
     return {"root": str(root).replace("\\", "/"), "tree": _list_tree(root)}
 
 
@@ -138,7 +183,7 @@ def api_project_tree(path: str) -> dict:
 def api_project_file(path: str) -> dict:
     p = Path(path).resolve()
     if not p.is_file():
-        return JSONResponse({"error": "file nahi mila"}, status_code=400)
+        return JSONResponse({"error": "file not found"}, status_code=400)
     try:
         content = p.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
@@ -167,42 +212,43 @@ def _worker_task(prompt: str, cwd: str) -> str:
     return run_opencode(FREE_MODEL, prompt, cwd, 900)
 
 
-def _agent_worker(job_id: str, project: Path, instruction: str, apply: bool) -> None:
+def _agent_worker(job_id: str, project: Path, instruction: str, apply: bool, lang: str) -> None:
     try:
-        _push(job_id, "plan", f"plan bana raha hoon for: {instruction[:80]}")
+        _push(job_id, "plan", f"creating plan for: {instruction[:80]}")
         ps = PlanStore.create(
             title=f"web: {instruction[:60]}",
             goal=instruction,
             plans_dir=str(ROOT / ".os" / "plans"),
         )
-        ps.add_task("Samajhna aur context pakana", "free", task_id="understand")
+        ps.add_task("Understand and pack context", "free", task_id="understand")
         ps.add_task(instruction, "free", task_id="implement")
-        ps.add_task("Tests chala ke verify karna", "toolbox", task_id="verify")
+        ps.add_task("Run tests and verify", "toolbox", task_id="verify")
         plan_id = ps.plan_id
-        _push(job_id, "plan", f"plan {plan_id} bana")
+        _push(job_id, "plan", f"plan {plan_id} created")
 
-        _push(job_id, "context", "relevant files ke context pack kar raha hoon")
+        _push(job_id, "context", "packing context of relevant files")
         try:
             pack = packer.pack([], root=str(project), max_lines=600, include_symbol_table=True)
             context = pack.get("output", "")[:12000]
         except Exception as exc:  # noqa: BLE001
             context = f"(context pack failed: {exc})"
 
-        _push(job_id, "worker", "sandbox copy bana raha hoon (real files safe hain)")
+        _push(job_id, "worker", "making sandbox copy (real files stay safe)")
         copy = Path(project) / ".os" / "sandbox" / f"web-{int(time.time() * 1000)}"
         copy_repo(str(project), str(copy))
-        _push(job_id, "worker", "free worker ko task de raha hoon (opencode, {})".format(FREE_MODEL))
+        _push(job_id, "worker", "sending task to free worker (opencode, {})".format(FREE_MODEL))
 
         prompt = (
             "You are the implementer inside a disposable working copy of a repository "
             f"at {copy}.\n\nTask from the user: {instruction}\n\nRepo context:\n{context}\n\n"
             "Implement the requested change in the working copy by WRITING the files. "
             "Keep edits minimal and idiomatic. Do NOT touch anything under .os/. "
-            "When done, reply with a short summary and the files you changed."
+            "When done, reply with a short summary and the files you changed. "
+            + _dirive_lang(lang)
         )
         reply = _worker_task(prompt, str(copy))
         if not reply.strip():
-            reply = "(worker ne koi text reply nahi diya — sandbox files check kar raha hoon)"
+            reply = "(worker gave no text reply — checking sandbox files)"
         _push(job_id, "worker", f"worker done: {reply[:300]}")
 
         # verify + fix INSIDE the worker's copy, so edits and the test loop agree on one
@@ -224,7 +270,8 @@ def _agent_worker(job_id: str, project: Path, instruction: str, apply: bool) -> 
                 for f in result.failures[:8])
             ctx = testloop._failure_context(copy_str, result.failures)
             fix = testloop.FIX_PROMPT.format(test_brief=brief, context=ctx)
-            _push(job_id, "worker", f"fix iteration {i} chala raha hoon")
+            fix += "\n" + _dirive_lang(lang)
+            _push(job_id, "worker", f"running fix iteration {i}")
             try:
                 _worker_task(fix, copy_str)
             except Exception as exc:  # noqa: BLE001
@@ -232,9 +279,9 @@ def _agent_worker(job_id: str, project: Path, instruction: str, apply: bool) -> 
                 break
 
         if green:
-            _push(job_id, "test", "GREEN — saare tests pass")
+            _push(job_id, "test", "GREEN — all tests pass")
         else:
-            _push(job_id, "test", "RED — tests fail hain, diff review kar lo")
+            _push(job_id, "test", "RED — tests are failing, review the diff")
 
         patch = diffpatch.make_patch(str(project), copy_str)
         changed = [f["path"] for f in patch.get("files", [])]
@@ -256,17 +303,17 @@ def _agent_worker(job_id: str, project: Path, instruction: str, apply: bool) -> 
             applied = diffpatch.apply_copy_to_original(str(project), copy_str)
             result["applied"] = applied.get("ok", False)
             result["state"] = "applied" if applied.get("ok") else "review"
-            _push(job_id, "apply", "changes real tree par apply kar diye")
+            _push(job_id, "apply", "changes applied to the real tree")
             memory.add("lesson", f"web app applied {len(changed)} file(s) on {project.name}",
                        tags=["app", project.name])
         else:
             result["applied"] = False
             if apply and not green:
-                _push(job_id, "apply", "tests red the, apply nahi kiya (review kar lo)")
+                _push(job_id, "apply", "tests were red, nothing applied (review first)")
             elif apply and not changed:
-                _push(job_id, "apply", "koi file change nahi hui, apply skip")
+                _push(job_id, "apply", "no files changed, apply skipped")
             elif not apply:
-                _push(job_id, "apply", "apply off hai — Review ke baad Apply dabao")
+                _push(job_id, "apply", "apply is off — press Apply after reviewing")
         _job_update(job_id, done=True, result=result,
                     events=[{"t": time.strftime("%H:%M:%S"), "stage": "done", "msg": "complete"}])
     except Exception as exc:  # noqa: BLE001
@@ -285,16 +332,17 @@ async def api_agent_run(req: Request) -> dict:
     if not instruction:
         return JSONResponse({"error": "instruction empty"}, status_code=400)
     job_id = uuid.uuid4().hex[:10]
-    _JOBS[job_id] = {"id": job_id, "events": [], "stage": "queued", "done": False}
+    lang = _detect_lang(instruction)
+    _JOBS[job_id] = {"id": job_id, "events": [], "stage": "queued", "done": False, "lang": lang}
     threading.Thread(target=_agent_worker,
-                     args=(job_id, project, instruction, apply), daemon=True).start()
-    return {"job_id": job_id}
+                     args=(job_id, project, instruction, apply, lang), daemon=True).start()
+    return {"job_id": job_id, "lang": lang}
 
 
 @APP.get("/api/agent/status")
 def api_agent_status(job_id: str) -> dict:
     if job_id not in _JOBS:
-        return JSONResponse({"error": "job nahi mila"}, status_code=404)
+        return JSONResponse({"error": "job not found"}, status_code=404)
     return _job(job_id)
 
 
