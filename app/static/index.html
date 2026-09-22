@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Engineering OS</title>
+<link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+<div id="app">
+
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo">&#9681;</span>
+      <span><strong>AI Engineering OS</strong> <span id="conn" class="badge off">connecting</span></span>
+    </div>
+    <div class="top-actions">
+      <button id="btn-primer" title="Session primer">&#128161; Primer</button>
+      <button id="btn-refresh" title="Refresh status">&#10227;</button>
+    </div>
+  </header>
+
+  <aside id="sidebar">
+    <div class="side-head">
+      <h2>Projects</h2>
+      <button id="btn-add-project" title="Add project folder">&#43;</button>
+    </div>
+    <ul id="project-list" class="nav"></ul>
+
+    <div class="side-head">
+      <h2>Files</h2>
+    </div>
+    <div id="file-tree" class="files"><div class="muted">ek project kholo</div></div>
+  </aside>
+
+  <main id="main">
+
+    <section id="job-panel" class="card hidden">
+      <div class="job-head">
+        <h3 id="job-title">Agent</h3>
+        <span id="job-stage" class="badge">queued</span>
+      </div>
+      <ul id="job-events" class="events"></ul>
+      <div id="job-result" class="result"></div>
+    </section>
+
+    <section id="primer-panel" class="card hidden">
+      <button class="close" data-close="primer-panel">&times;</button>
+      <h3>Session Primer (memory)</h3>
+      <div id="primer-body"></div>
+    </section>
+
+    <section id="chat-panel" class="card lift">
+      <div id="chat-log" class="chat"></div>
+      <form id="chat-form">
+        <select id="act" title="Kya karna hai">
+          <option value="implement">Implement / Feature</option>
+          <option value="fix">Fix failing tests</option>
+          <option value="review">Review &amp; explain</option>
+        </select>
+        <input id="chat-input" type="text" autocomplete="off"
+               placeholder="Project + task batao, e.g.  add multiplication support to calc.py" />
+        <button id="chat-send" type="submit">&#9654; Run</button>
+      </form>
+    </section>
+
+  </main>
+</div>
+
+<footer id="footer">
+  <span id="f-model"></span>
+  <span id="f-jobs"></span>
+</footer>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
