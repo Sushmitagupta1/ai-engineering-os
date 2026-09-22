@@ -48,6 +48,7 @@ def _run(argv: list[str], cwd: str, timeout: int) -> subprocess.CompletedProcess
         argv,
         cwd=cwd,
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         text=True,
         timeout=timeout,
         encoding="utf-8",
