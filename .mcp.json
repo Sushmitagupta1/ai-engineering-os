@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "freeworker": {
+      "command": "python",
+      "args": ["-u", "freeworker/server.py"],
+      "env": {}
+    },
+    "repoindex": {
+      "command": "python",
+      "args": ["-u", "repoindex/server.py"],
+      "env": {}
+    },
+    "toolbox": {
+      "command": "python",
+      "args": ["-u", "tools/server.py"],
+      "env": {}
+    }
+  }
+}

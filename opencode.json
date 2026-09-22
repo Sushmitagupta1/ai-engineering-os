@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "freeworker": {
+      "type": "local",
+      "command": ["python", "-u", "freeworker/server.py"],
+      "cwd": ".",
+      "enabled": true
+    },
+    "repoindex": {
+      "type": "local",
+      "command": ["python", "-u", "repoindex/server.py"],
+      "cwd": ".",
+      "enabled": true
+    },
+    "toolbox": {
+      "type": "local",
+      "command": ["python", "-u", "tools/server.py"],
+      "cwd": ".",
+      "enabled": true
+    }
+  }
+}
