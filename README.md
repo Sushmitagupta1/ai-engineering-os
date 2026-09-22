@@ -24,7 +24,6 @@ your own machine.
 - [First steps](#first-steps)
 - [CLI commands](#cli-commands)
 - [Protocols](#protocols)
-- [Repository layout](#repository-layout)
 - [Runtime data](#runtime-data)
 - [Requirements](#requirements)
 - [License](#license)
@@ -378,42 +377,6 @@ tools are meant to be used end-to-end.
 - `toolbox_autopilot repo_root [plan_dir] [apply]` — chains: run plan's free/toolbox
   tiers → sandbox test loop → apply if green → record metrics + memory lesson. Judgment
   tasks stay `assigned` for you. Safe default: `apply=false`.
-
----
-
-## Repository layout
-
-```
-freeworker/   MCP control plane that shells out to `opencode run` (free models)
-  dispatch.py     stdin-pipe runner (Windows 32K arg limit safe)
-  server.py       freeworker MCP server
-  requirements.txt
-repoindex/    M1 code-intelligence engine: tree-sitter extraction, SQLite store
-  ingest.py       repo ingestion CLI
-  query.py        query CLI        store.py       SQLite store
-  symbols.py      symbol extraction lang dispatch
-  chunk.py        chunking          ts.py          tree-sitter wiring
-  summarize.py    free-model chunk enrichment
-  server.py       repoindex MCP server
-sandbox/      M4 isolation
-  runner.py       docker-first / disposable-copy pytest runner
-tools/        M2-M7 deterministic toolbox
-  codelens.py     call graph        relevant.py    issue->files scoring
-  packer.py       bounded context   plan.py        plan ledger
-  looper.py       tier-aware executor
-  testloop.py     JUnit parse + fix-retry loop
-  diffpatch.py    copy-vs-tree diff + safe apply (M5)
-  eval.py         seeded-bug suite  metrics.py     JSONL eval ledger (M6)
-  memory.py       journal + recall  autopilot.py   one-call chain (M7)
-  server.py       toolbox MCP server (24 tools)
-.claude/      subagent definitions (planner/builder/debugger/reviewer) + event hook
-.opencode/    (optional) opencode agent definitions
-.os/          runtime data (index.db, plans, metrics, memory — gitignored)
-.gitignore    ignores .venv, .os, __pycache__, etc.
-.mcp.json     Claude Code MCP registration
-opencode.json opencode MCP registration
-requirements.txt  Python dependencies (mcp, tree-sitter + grammars)
-```
 
 ---
 
