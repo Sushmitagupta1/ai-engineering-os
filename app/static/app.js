@@ -250,7 +250,7 @@ async function tick(jobId, instruction, apply, actLabel) {
 function finishJob(st, instruction, apply, actLabel) {
   const r = st.result;
   if (st.error || !r) {
-    addMsg("sys", "⚠ job fail: " + escape(st.error || "koi result nahi"));
+    addMsg("sys", "⚠ job fail: " + escape(st.error || "job returned no result"));
     return;
   }
   pendingCopy = r.copy_dir || null;

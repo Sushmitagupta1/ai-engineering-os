@@ -26,7 +26,11 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from freeworker.dispatch import run_opencode
+import os as _os
+import re as _re
+import subprocess as _subprocess
+
+from freeworker.dispatch import opencode_binary
 from tools import diffpatch, memory
 from tools.plan import PlanStore
 from sandbox.runner import copy_repo
@@ -37,6 +41,117 @@ APP = FastAPI(title="AI Engineering OS")
 HERE = Path(__file__).resolve().parent
 STATIC = HERE / "static"
 PROJECTS_FILE = ROOT / ".os" / "app" / "projects.json"
+
+_MAX_EVENTS = 400
+
+
+def _worker_task_stream(job_id: str, prompt: str, cwd: str, timeout: int = 900,
+                        stage: str = "worker", ansi: bool = True) -> str:
+    """Run opencode as a background worker, forwarding its stdout LIVE to the job feed.
+
+    Returns the trimmed worker reply (last meaningful text block)."""
+    cmd = [opencode_binary(), "run", "-m", FREE_MODEL, "--dir", cwd]
+    try:
+        proc = _subprocess.Popen(
+            cmd, stdin=_subprocess.PIPE, stdout=_subprocess.PIPE,
+            stderr=_subprocess.STDOUT, cwd=cwd, text=True,
+            encoding="utf-8", errors="replace",
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"worker spawn failed: {exc}") from exc
+    try:
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.write(prompt)
+        proc.stdin.close()
+    except BrokenPipeError:
+        pass
+    buf: list[str] = []
+    for raw in proc.stdout:
+        line = raw.rstrip("\n")
+        try:
+            if ansi:
+                clean = line
+                clean = _re.sub(r"\x1b\][^\x07\x1b]*(\x07|\x1b\\)", "", clean)  # OSC
+                clean = _re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", clean)          # CSI
+                clean = _re.sub(r"\x1b[()[\]][0-9;]*[ -/]*[@-~]", "", clean)      # ESC seqs
+                clean = _strip_icons(clean)
+            else:
+                clean = line
+        except Exception:  # noqa: BLE001
+            clean = line
+        if not clean.strip():
+            continue
+        buf.append(clean)
+        if len(buf) > 200:
+            buf.pop(0)
+        show = clean[:240]
+        if show.startswith("󰘦") or show.startswith("▲") or len(show) > 220:
+            continue
+        if "Warning: This code is a part of" in show or "npm warn" in show:
+            continue
+        _push(job_id, stage if stage else "worker", show)
+    rc = proc.wait(timeout=timeout)
+    if rc != 0 and not buf:
+        stderr_tail = ""
+        try:
+            stderr_tail = proc.stderr.read()[-2000:] if proc.stderr else ""
+        except Exception:  # noqa: BLE001
+            pass
+        raise RuntimeError(f"worker failed rc={rc}: {stderr_tail[-1000:]}")
+    return _prettify_stream(buf)
+
+
+def _strip_icons(line: str) -> str:
+    """Replace lost-glyph artifacts and common term icons with plain ASCII markers."""
+    line = _re.sub(r"[^\x20-\x7E]", "", line)
+    line = line.replace("  ", " ").strip()
+    return line
+
+
+def _prettify_stream(lines: list[str]) -> str:
+    """Condense raw opencode terminal lines into a short final answer: tool-list + prose tail."""
+    def re_full_dots(s: str) -> bool:
+        return bool(_re.fullmatch(r"[.\s\-\u2026]*[.]{2,}[.\s\-\u2026]*", s))
+
+    tools = []
+    prose: list[str] = []
+    for ln in lines:
+        s = ln.strip()
+        low = s.lower()
+        if s.startswith(">"):
+            tools.append(s[1:].strip())
+            continue
+        if low.startswith("glob ") or low.startswith("read ") or low.startswith("write ") or \
+           low.startswith("edit ") or low.startswith("create ") or low.startswith("delete ") or \
+           low.startswith("remove ") or low.startswith("$ ") or low.startswith("$$") or \
+           low.startswith("index:") or s.startswith("---") or s.startswith("+++") or \
+           s.startswith("@@") or "passed in" in low or "failed in" in low or \
+           low.startswith("could not find platform") or low.startswith("global ") or \
+           low.startswith("wrote file successfully") or low.startswith("no newline") or \
+           low.startswith("done!") or low.startswith("creating ") or low.startswith("build ") or \
+           low.startswith("> ") or low.startswith("wrote  ") or "%]" in low or \
+           re_full_dots(s) or s.startswith("+") or s.startswith("-"):
+            continue
+        prose.append(s)
+    head = ""
+    if tools:
+        uniq = []
+        for t in tools:
+            t2 = t
+            if t2.lower().startswith("build "):
+                t2 = t2[6:].strip()
+            if t2 and t2 not in uniq:
+                uniq.append(t2)
+        if uniq:
+            head = "· ".join(uniq[:12])
+    tail = [p for p in prose if len(p) > 2][-30:]
+    if head and len(uniq) >= 2 and tail:
+        return head + "\n\n" + "\n".join(tail)
+    return tail and "\n".join(tail) or head
+
+
+def _worker_task(prompt: str, cwd: str) -> str:
+    return run_opencode(FREE_MODEL, prompt, cwd, 900)
 
 def _detect_lang(text: str) -> str:
     """Return 'hinglish' when the user clearly writes in Devanagari or heavy Hinglish,
@@ -115,6 +230,8 @@ def _job_update(job_id: str, **kw) -> dict:
         for k, v in kw.items():
             if k == "events":
                 j["events"].extend(v)
+                if len(j["events"]) > _MAX_EVENTS:
+                    del j["events"][: len(j["events"]) - _MAX_EVENTS]
             else:
                 j[k] = v
         return j
@@ -208,10 +325,6 @@ def api_status() -> dict:
 
 # ---------------------------------------------------------------- agent run
 
-def _worker_task(prompt: str, cwd: str) -> str:
-    return run_opencode(FREE_MODEL, prompt, cwd, 900)
-
-
 def _agent_worker(job_id: str, project: Path, instruction: str, apply: bool, lang: str) -> None:
     try:
         _push(job_id, "plan", f"creating plan for: {instruction[:80]}")
@@ -246,10 +359,10 @@ def _agent_worker(job_id: str, project: Path, instruction: str, apply: bool, lan
             "When done, reply with a short summary and the files you changed. "
             + _dirive_lang(lang)
         )
-        reply = _worker_task(prompt, str(copy))
+        reply = _worker_task_stream(job_id, prompt, str(copy))
         if not reply.strip():
             reply = "(worker gave no text reply — checking sandbox files)"
-        _push(job_id, "worker", f"worker done: {reply[:300]}")
+        _push(job_id, "worker", "worker done")
 
         # verify + fix INSIDE the worker's copy, so edits and the test loop agree on one
         # battleground (run_test_loop makes its own fresh copy; here we reuse `copy`)
@@ -273,7 +386,7 @@ def _agent_worker(job_id: str, project: Path, instruction: str, apply: bool, lan
             fix += "\n" + _dirive_lang(lang)
             _push(job_id, "worker", f"running fix iteration {i}")
             try:
-                _worker_task(fix, copy_str)
+                _worker_task_stream(job_id, fix, copy_str, stage="fix")
             except Exception as exc:  # noqa: BLE001
                 _push(job_id, "worker", f"fix worker error: {exc}")
                 break
