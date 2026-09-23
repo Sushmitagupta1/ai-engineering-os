@@ -210,7 +210,7 @@ async function runJob(instruction, apply, actLabel) {
     $("#job-title").textContent = `Agent — ${project.name}`;
     $("#job-events").innerHTML = "";
     $("#job-result").innerHTML = "";
-    poll = r.job_id;
+    poll = setInterval(() => tick(r.job_id, instruction, apply, actLabel), 1500);
     tick(r.job_id, instruction, apply, actLabel);
   } catch (e) {
     busy.remove();
